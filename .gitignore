@@ -1,0 +1,18 @@
+# Python specifics
+__pycache__/
+*.pyc
+
+# Virtual Environments
+venv/
+env/
+.env
+
+# IDE settings
+.vscode/
+.idea/
+
+# Database (if any local sqlite is used)
+*.sqlite3
+*.db
+
+با انجام این کار، وقتی دستور `git status` را بزنید، دیگر پوشه `venv` یا فایل‌های `__pycache__` را در لیست فایل‌های آماده برای آپلود نخواهید دید.

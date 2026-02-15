@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>داشبورد WebGIS</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Tahoma', sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        .floating-navbar {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 1000px; background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px); padding: 10px 20px; border-radius: 50px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2); z-index: 1000;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .user-info { font-weight: bold; color: #333; }
+        .btn-logout { background: #ff4757; color: white; border-radius: 20px; padding: 5px 20px; text-decoration: none; }
+        .leaflet-container { cursor: crosshair; }
+        .table-custom tr td:first-child { background-color: #f8f9fa; width: 40%; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div class="floating-navbar">
+        <div class="d-flex align-items-center">
+            <i class="bi bi-geo-alt-fill text-primary fs-4 me-2"></i>
+            <span class="fs-5 fw-bold text-dark">سامانه هوشمند WebGIS</span>
+        </div>
+        <div class="user-info">
+            <span><i class="bi bi-person-circle"></i> {{ username }}</span>
+            <span class="mx-2">|</span>
+            <a href="/logout" class="btn-logout">خروج</a>
+        </div>
+    </div>
+
+    <div id="map"></div>
+
+    <!-- مودال -->
+    <div class="modal fade" id="featureModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">جزئیات منطقه</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="modal-body-content"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">بستن</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    
+    <script>
+        var map = L.map('map', { zoomControl: false }).setView([32.4279, 53.6880], 5);
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        // لایه نقشه پایه
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 19, attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // -----------------------------------------------------------
+        // تغییر مهم: آدرس لایه WMS به سرور خودمان (پروکسی) اشاره می‌کند
+        // -----------------------------------------------------------
+        var wmsLayer = L.tileLayer.wms('/proxy_wms', {
+            layers: 'ne:ne_10m_admin_0_countries',
+            format: 'image/png',
+            transparent: true,
+            version: '1.1.0',
+            attribution: "Weather Data © 2026"
+        }).addTo(map);
+
+        map.on('click', function(e) {
+            document.getElementById('modal-body-content').innerHTML = `
+                <div class="text-center py-4"><div class="spinner-border text-primary"></div><p>درحال دریافت...</p></div>`;
+            var myModal = new bootstrap.Modal(document.getElementById('featureModal'));
+            myModal.show();
+
+            // ساخت URL برای درخواست اطلاعات (به سمت پروکسی خودمان)
+            var url = getFeatureInfoUrl(map, wmsLayer, e.latlng, {
+                'info_format': 'application/json'
+            });
+
+            console.log("Requesting URL:", url); // جهت دیباگ در کنسول
+
+            fetch(url)
+                .then(response => {
+                    if (!response.ok) throw new Error("HTTP Status: " + response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.features && data.features.length > 0) {
+                        var props = data.features[0].properties;
+                        var content = `<table class="table table-bordered table-custom"><tbody>
+                            <tr><td>نام کشور</td><td>${props.name || props.ADMIN || 'نامشخص'}</td></tr>
+                            <tr><td>جمعیت</td><td>${props.pop_est || 'نامشخص'}</td></tr>
+                            <tr><td>قاره</td><td>${props.continent || 'نامشخص'}</td></tr>
+                            <tr><td>درآمد</td><td>${props.income_grp || 'نامشخص'}</td></tr>
+                        </tbody></table>`;
+                        document.getElementById('modal-body-content').innerHTML = content;
+                    } else {
+                        document.getElementById('modal-body-content').innerHTML = `<div class="alert alert-warning">اطلاعاتی یافت نشد.</div>`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('modal-body-content').innerHTML = `
+                        <div class="alert alert-danger">
+                            خطا در ارتباط با سرور.<br>
+                            <small>${error.message}</small>
+                        </div>`;
+                });
+        });
+
+        // تابع استاندارد ساخت URL درخواست GetFeatureInfo
+        function getFeatureInfoUrl(map, layer, latlng, params) {
+            var point = map.latLngToContainerPoint(latlng, map.getZoom()),
+                size = map.getSize(),
+                bounds = map.getBounds(),
+                sw = bounds.getSouthWest(),
+                ne = bounds.getNorthEast();
+
+            var defaultParams = {
+                request: 'GetFeatureInfo',
+                service: 'WMS',
+                srs: 'EPSG:4326',
+                styles: '',
+                transparent: true,
+                version: layer.wmsParams.version,
+                format: layer.wmsParams.format,
+                bbox: sw.lat + ',' + sw.lng + ',' + ne.lat + ',' + ne.lng,
+                height: size.y,
+                width: size.x,
+                layers: layer.wmsParams.layers,
+                query_layers: layer.wmsParams.layers,
+                info_format: 'application/json'
+            };
+
+            params = L.Util.extend(defaultParams, params || {});
+            params[params.version === '1.3.0' ? 'i' : 'x'] = Math.round(point.x);
+            params[params.version === '1.3.0' ? 'j' : 'y'] = Math.round(point.y);
+
+            // آدرس پروکسی
+            return '/proxy_wms' + L.Util.getParamString(params, '/proxy_wms', true);
+        }
+    </script>
+</body>
+</html>
